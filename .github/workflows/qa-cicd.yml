@@ -484,6 +484,6 @@ jobs:
         with:
           push: true
           tags: |
-            devopsshack/nodejs-app:${{ github.sha }}
-            devopsshack/nodejs-app:latest
+            sathwickdutt/nodejs-app:${{ github.sha }}
+            sathwickdutt/nodejs-app:latest
 
