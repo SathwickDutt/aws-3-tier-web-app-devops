@@ -1,3 +1,4 @@
+
 # Trigger Test-3
 name: Production CD Pipeline
 
@@ -33,12 +34,10 @@ jobs:
         run: docker pull "${QA_IMAGE}"
 
       - name: Retag image for production
-        run: |
-          docker tag "${QA_IMAGE}" "${PROD_LATEST_IMAGE}"
+        run: docker tag "${QA_IMAGE}" "${PROD_LATEST_IMAGE}"
 
-      - name: Push prod images
-        run: |
-          docker push "${PROD_LATEST_IMAGE}"
+      - name: Push prod image
+        run: docker push "${PROD_LATEST_IMAGE}"
 
   update-prod-manifest:
     name: Update Prod Manifest
@@ -56,7 +55,8 @@ jobs:
 
       - name: Update image tag in prod manifest
         run: |
-          sed -i "s|image: sathwickdutt/nodejs-app:.*|image: sathwickdutt/nodejs-app:prod-${GITHUB_SHA}|g" k8-manifests/prod/app-deployment.yaml
+          sed -i "s|image: sathwickdutt/nodejs-app:.*|image: sathwickdutt/nodejs-app:prod-${GITHUB_SHA}|g" \
+            k8-manifests/prod/app-deployment.yaml
 
       - name: Show updated manifest
         run: cat k8-manifests/prod/app-deployment.yaml
@@ -86,6 +86,55 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: main
 
+      # DEBUG STEP 1: Inspect workflow context (no secrets printed)
+      - name: Debug GitHub OIDC context
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Branch/ref: $GITHUB_REF"
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Expected standard OIDC subject:"
+          echo "repo:${GITHUB_REPOSITORY}:ref:${GITHUB_REF}"
+          echo "AWS region: $AWS_REGION"
+          echo "EKS cluster: $EKS_CLUSTER_NAME"
+
+          if [ -n "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}" ]; then
+            echo "AWS_ROLE_TO_ASSUME_PROD is configured"
+          else
+            echo "::error::AWS_ROLE_TO_ASSUME_PROD is missing"
+            exit 1
+          fi
+
+      # DEBUG STEP 2: Decode only selected OIDC claims.
+      # Never print the raw OIDC token.
+      - name: Debug GitHub OIDC claims
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RESPONSE="$(curl -fsS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+
+          TOKEN="$(printf '%s' "$RESPONSE" | jq -er '.value')"
+
+          PAYLOAD="$(printf '%s' "$TOKEN" \
+            | cut -d '.' -f 2 \
+            | tr '_-' '/+' \
+            | base64 -d 2>/dev/null)"
+
+          echo "$PAYLOAD" | jq '{
+            sub,
+            aud,
+            repository,
+            ref,
+            environment,
+            repository_id,
+            repository_owner_id
+          }'
+
+          unset TOKEN PAYLOAD RESPONSE
+
+      # AWS authentication
       - name: Configure AWS credentials from GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -96,9 +145,12 @@ jobs:
         uses: azure/setup-kubectl@v4
 
       - name: Generate kubeconfig for EKS
-        run: aws eks update-kubeconfig --region "${AWS_REGION}" --name "${EKS_CLUSTER_NAME}"
+        run: |
+          aws eks update-kubeconfig \
+            --region "${AWS_REGION}" \
+            --name "${EKS_CLUSTER_NAME}"
 
-      - name: Verify identity
+      - name: Verify AWS identity
         run: |
           aws sts get-caller-identity
           kubectl config current-context
@@ -107,14 +159,18 @@ jobs:
         run: |
           kubectl get pods -n "${K8S_NAMESPACE}" || true
           kubectl get services -n "${K8S_NAMESPACE}" || true
+
           kubectl auth can-i create deployments -n "${K8S_NAMESPACE}"
           kubectl auth can-i create services -n "${K8S_NAMESPACE}"
           kubectl auth can-i create ingresses.networking.k8s.io -n "${K8S_NAMESPACE}"
 
       - name: Deploy prod manifests
         run: |
-          kubectl apply -f k8-manifests/prod/ -n "${K8S_NAMESPACE}"
+          kubectl apply -f k8-manifests/prod/ \
+            -n "${K8S_NAMESPACE}"
 
       - name: Verify rollout
         run: |
-          kubectl rollout status deployment/nodejs-app -n "${K8S_NAMESPACE}" --timeout=180s
+          kubectl rollout status deployment/nodejs-app \
+            -n "${K8S_NAMESPACE}" \
+            --timeout=180s
