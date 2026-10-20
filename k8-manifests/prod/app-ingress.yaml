@@ -8,11 +8,11 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:596871238941:certificate/4c6b89b1-7315-4ab8-be84-536ec4c55623
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:596871238941:certificate/4c6b89b1-7315-4ab8-be84-536ec4c55621
 spec:
   ingressClassName: alb
   rules:
-    - host: adityajaiswal.com
+    - host: epicreads-sathwick.online
       http:
         paths:
           - path: /
